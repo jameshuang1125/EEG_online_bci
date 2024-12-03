@@ -35,8 +35,8 @@ def styled_text(text=None, color="#999999"):
     return f"<span style=\" font-size:8pt; color:{color};\" >" + text + "</span>"    
 
 class MyMainWindow(QtWidgets. QMainWindow, Ui_MainWindow):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super(MyMainWindow, self).__init__(parent)
 
         self.setupUi(self)
         self.setWindowTitle('Brain GUI')    # Window title
@@ -46,7 +46,7 @@ class MyMainWindow(QtWidgets. QMainWindow, Ui_MainWindow):
         self.btnDisCon.clicked.connect(self.Disconnection)  # 斷線
         self.btnSave.clicked.connect(self.Savedata)  # 存檔
 
-         # 多線程
+        # 多線程
         self.queue_data_save_flag = Queue()
         self.queue_plot_data = Queue()
         self.queue_model_data = Queue()
@@ -79,6 +79,7 @@ class MyMainWindow(QtWidgets. QMainWindow, Ui_MainWindow):
         ports = serial.tools.list_ports.comports()
         for i, port in enumerate(ports):
             # port.device = 'COMX'
+            
             if "USB 序列裝置" in port.description:
                 default_idx = i
                 self.queue_comport.put(port.device)
@@ -93,7 +94,6 @@ class MyMainWindow(QtWidgets. QMainWindow, Ui_MainWindow):
         self.comboBox.currentIndexChanged.connect(self.on_combobox_changed)
 
         self.timer_activate = False
-
 
     def on_combobox_changed(self, index):
         if index < 0:
@@ -192,54 +192,54 @@ class DataReceiveThreads(Ui_MainWindow):
         print(f"Successfull Receive")
         queue_gui_message.put("Successfull Receive!\nReady to data streaming")
 
-        while True:
-            ser.reset_output_buffer() 
-            ser.reset_input_buffer()            
-            if not queue_data_save_flag.empty():
-                self.save_flag = queue_data_save_flag.get()
-            if self.save_flag:
-                break
+        # while True:
+        #     ser.reset_output_buffer() 
+        #     ser.reset_input_buffer()            
+        #     if not queue_data_save_flag.empty():
+        #         self.save_flag = queue_data_save_flag.get()
+        #     if self.save_flag:
+        #         break
     
-        f = open(f"{self.fileDir}/1/{self.fileName}", "a")
+        # f = open(f"{self.fileDir}/1/{self.fileName}", "a")
 
-        while True:     
-            if not queue_data_save_flag.empty():
-                self.save_flag = queue_data_save_flag.get()
-            if not self.save_flag:
-                # 結束後寫入最後收到的資料到EEG.txt
-                with open(f"{self.fileDir}/1/{self.fileName}", "a") as f:
-                    f.write(self.total_data)
-                    f.close()
+        # while True:     
+        #     if not queue_data_save_flag.empty():
+        #         self.save_flag = queue_data_save_flag.get()
+        #     if not self.save_flag:
+        #         # 結束後寫入最後收到的資料到EEG.txt
+        #         with open(f"{self.fileDir}/1/{self.fileName}", "a") as f:
+        #             f.write(self.total_data)
+        #             f.close()
                 
-            # 每次讀取 32 bytes(一組EEG data的大小)並轉成16進位。收一次等於 1ms 的時間
-            self.data = ser.read(32).hex() 
-            self.total_data = self.total_data + self.data
-            self.count = self.count + 1
+        #     # 每次讀取 32 bytes(一組EEG data的大小)並轉成16進位。收一次等於 1ms 的時間
+        #     self.data = ser.read(32).hex() 
+        #     self.total_data = self.total_data + self.data
+        #     self.count = self.count + 1
             
-            # -------------------------------------------------------- #
-            # 送去畫圖的資料 (每 100 ms 寫入資料到txt的最尾端)
-            # -------------------------------------------------------- #   
+        #     # -------------------------------------------------------- #
+        #     # 送去畫圖的資料 (每 100 ms 寫入資料到txt的最尾端)
+        #     # -------------------------------------------------------- #   
                                  
-            if self.count >= 100:
-                queue_plot_data.put(self.total_data)
+        #     if self.count >= 100:
+        #         queue_plot_data.put(self.total_data)
 
-                f.write(self.total_data)
-                self.count = 0
-                self.total_data = ""                
+        #         f.write(self.total_data)
+        #         self.count = 0
+        #         self.total_data = ""                
 
-            # -------------------------------------------------------- #
-            # 送進模型的資料
-            # -------------------------------------------------------- #
-            self.total_data_model = self.total_data_model + self.data
-            self.count_model = self.count_model + 1
+        #     # -------------------------------------------------------- #
+        #     # 送進模型的資料
+        #     # -------------------------------------------------------- #
+        #     self.total_data_model = self.total_data_model + self.data
+        #     self.count_model = self.count_model + 1
 
-            if self.count_model >= 3000:
-                # 將3s的資料丟進queue
-                queue_model_data.put(self.total_data_model)
+        #     if self.count_model >= 3000:
+        #         # 將3s的資料丟進queue
+        #         queue_model_data.put(self.total_data_model)
                 
-                # 經過 100 ms，raw長度 = 64*100 = 6400
-                self.count_model     -= 100
-                self.total_data_model = self.total_data_model[6400:]
+        #         # 經過 100 ms，raw長度 = 64*100 = 6400
+        #         self.count_model     -= 100
+        #         self.total_data_model = self.total_data_model[6400:]
 
 class ModelPredictThreads(Ui_MainWindow):
     def __init__(self, model_state_dict_path, mean_std_path):
