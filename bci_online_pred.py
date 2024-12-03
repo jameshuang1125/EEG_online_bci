@@ -19,15 +19,15 @@ import torch
 from torch.autograd import Variable
 
 from eeg_decoder import Decoder, Filter
+from EEGConformer_spectrum import Conformer
 
-SUBJECT_NAME = '彥'
+SUBJECT_NAME = 'all_subjects_30_flip'
 # ROOT_DIR = f"../EEG_dataset/4classes_all_for_train/offline"
 # ROOT_DIR = f"../EEG_dataset/4classes_all_for_train/online_1"
-ROOT_DIR = f"../EEG_dataset/4classes_all_for_train/online_2"
+ROOT_DIR = f"../EEG_dataset/2classes_all_for_train_spectrum"
 
 model_state_dict_path = f"{ROOT_DIR}/{SUBJECT_NAME}/best_model_{SUBJECT_NAME}.pth"
-# mean_std_path         = f"{ROOT_DIR}/{SUBJECT_NAME}/mean_std.txt"
-mean_std_path         = f"../EEG_dataset/4classes_all_for_train/offline/{SUBJECT_NAME}/mean_std.txt"
+mean_std_path         = f"../EEG_dataset/2classes_all_for_train_spectrum/{SUBJECT_NAME}/mean_std.txt"
 
 def styled_text(text=None, color="#999999"):
     if text is None:
@@ -55,7 +55,6 @@ class MyMainWindow(QtWidgets. QMainWindow, Ui_MainWindow):
 
         # 建立資料接收class
         self.dt = DataReceiveThreads()  
-
 
         # 建立模型預測class
         self.mpt = ModelPredictThreads(model_state_dict_path, mean_std_path)
@@ -104,7 +103,6 @@ class MyMainWindow(QtWidgets. QMainWindow, Ui_MainWindow):
         print(f'Selected Port: {COM_PORT}')
         self.queue_comport.put(COM_PORT)
 
-
         self.message.append(styled_text()) 
         self.message.append(f'>> Selected Port: {COM_PORT}')
 
@@ -130,7 +128,6 @@ class MyMainWindow(QtWidgets. QMainWindow, Ui_MainWindow):
             self.message.append(styled_text()) 
             self.message.append(f'>> All Processes had been\nterminated. You can close\nthis window.')
 
-
             print("All processes had been killed\nYou can close this window")
             self.multipDataRecv.terminate()
             self.multipOnlineBCI.terminate()
@@ -150,8 +147,7 @@ class MyMainWindow(QtWidgets. QMainWindow, Ui_MainWindow):
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update_plot)
         self.timer.start(50)   
-        self.timer_activate = True           
-
+        self.timer_activate = True
 
         self.start_time = time.time()
         self.timer_2 = QtCore.QTimer()
@@ -190,13 +186,11 @@ class DataReceiveThreads(Ui_MainWindow):
                 # Get last selected COM port name from queue
                 COM_PORT = queue_comport.get()
                 break
-        
 
         print(f"Open {COM_PORT}...")
         ser = serial.Serial(COM_PORT, 460800)
         print(f"Successfull Receive")
         queue_gui_message.put("Successfull Receive!\nReady to data streaming")
-
 
         while True:
             ser.reset_output_buffer() 
