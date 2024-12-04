@@ -21,13 +21,13 @@ from torch.autograd import Variable
 from eeg_decoder import Decoder, Filter
 from EEGConformer_spectrum import Conformer
 
-SUBJECT_NAME = 'all_subjects_30_flip'
+SUBJECT_NAME = 'all_subjects_10_flip'
 # ROOT_DIR = f"../EEG_dataset/4classes_all_for_train/offline"
 # ROOT_DIR = f"../EEG_dataset/4classes_all_for_train/online_1"
-ROOT_DIR = f"../EEG_dataset/2classes_all_for_train_spectrum"
+ROOT_DIR = f"../EEG_dataset/2classes_all_for_train_spectrum_conv2d"
 
 model_state_dict_path = f"{ROOT_DIR}/{SUBJECT_NAME}/best_model_{SUBJECT_NAME}.pth"
-mean_std_path         = f"../EEG_dataset/2classes_all_for_train_spectrum/{SUBJECT_NAME}/mean_std.txt"
+mean_std_path         = f"../EEG_dataset/2classes_all_for_train_spectrum_conv2d/{SUBJECT_NAME}/mean_std.txt"
 
 def styled_text(text=None, color="#999999"):
     if text is None:
@@ -75,8 +75,8 @@ class MyMainWindow(QtWidgets. QMainWindow, Ui_MainWindow):
         # ------------------------------------ #
         # Show all COM Port in combobox 
         # ------------------------------------ #
-        default_idx = -1
-        ports = serial.tools.list_ports.comports()
+        default_idx = -1    # 記錄預設選中的串口索引
+        ports = serial.tools.list_ports.comports()  # 返回一個包含每個串口設備信息的列表
         for i, port in enumerate(ports):
             # port.device = 'COMX'
             
@@ -91,9 +91,39 @@ class MyMainWindow(QtWidgets. QMainWindow, Ui_MainWindow):
             self.comboBox.addItem(port.device + ' - ' + port.description)
         
         self.comboBox.setCurrentIndex(default_idx)
+        # 當使用者選擇不同的串口時，會觸發 on_combobox_changed 方法
         self.comboBox.currentIndexChanged.connect(self.on_combobox_changed)
 
         self.timer_activate = False
+
+    def update_plot(self):
+        raw = self.queue_plot_data.get()
+        # clear the queue
+        while not self.queue_plot_data.empty():
+            temp = self.queue_plot_data.get() 
+            del temp
+
+        # # 64 * 3000 = 192000
+        if len(self.raw_total) >= 192000: 
+            self.raw_total = self.raw_total[-64000:]
+        else:
+            self.raw_total = self.raw_total + raw
+        
+        # shape = (n, 10)
+        eeg_raw = np.array(self.decoder.decode(self.raw_total))         
+        ydata = eeg_raw[1000: -1].T       
+        xdata = np.arange(ydata.shape[1])
+        for i in range(8):
+            self.canvas.lines[i].set_data(xdata, ydata[i])
+        
+        self.canvas.draw()
+
+    def update_time(self):
+        elapsed_time = time.time() - self.start_time
+        time_text = f"{(elapsed_time//60):>02.0f} : {(elapsed_time%60):>04.1f} ({elapsed_time:>04.1f})"
+ 
+        # showing it to the label
+        self.label_time.setText(time_text)
 
     def on_combobox_changed(self, index):
         if index < 0:
@@ -137,13 +167,13 @@ class MyMainWindow(QtWidgets. QMainWindow, Ui_MainWindow):
             self.timer.stop()
             self.timer_2.stop()
 
-
     def Savedata(self):
         self.message.append(styled_text())      
         self.message.append(f'>> Start data streaming')
         self.queue_data_save_flag.put(True)
         
         # Setup a timer to trigger the redraw by calling update_plot.
+        # 設置時間間隔，並在每次時間到達時觸發一個信號
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update_plot)
         self.timer.start(50)   
@@ -192,54 +222,57 @@ class DataReceiveThreads(Ui_MainWindow):
         print(f"Successfull Receive")
         queue_gui_message.put("Successfull Receive!\nReady to data streaming")
 
-        # while True:
-        #     ser.reset_output_buffer() 
-        #     ser.reset_input_buffer()            
-        #     if not queue_data_save_flag.empty():
-        #         self.save_flag = queue_data_save_flag.get()
-        #     if self.save_flag:
-        #         break
+        while True:
+            # 清空所有待發送的數據，保證發送緩衝區不會有任何舊數據影響後續的數據傳輸
+            ser.reset_output_buffer()
+            # 清除所有接收到的數據，通常用於確保不會使用過時或錯誤的接收數據
+            ser.reset_input_buffer()            
+            if not queue_data_save_flag.empty():
+                self.save_flag = queue_data_save_flag.get()
+            if self.save_flag:
+                break
     
-        # f = open(f"{self.fileDir}/1/{self.fileName}", "a")
+        f = open(f"{self.fileDir}/1/{self.fileName}", "a")
 
-        # while True:     
-        #     if not queue_data_save_flag.empty():
-        #         self.save_flag = queue_data_save_flag.get()
-        #     if not self.save_flag:
-        #         # 結束後寫入最後收到的資料到EEG.txt
-        #         with open(f"{self.fileDir}/1/{self.fileName}", "a") as f:
-        #             f.write(self.total_data)
-        #             f.close()
+        while True:     
+            if not queue_data_save_flag.empty():
+                self.save_flag = queue_data_save_flag.get()
+            if not self.save_flag:
+                # 結束後寫入最後收到的資料到EEG.txt
+                with open(f"{self.fileDir}/1/{self.fileName}", "a") as f:
+                    f.write(self.total_data)
+                    f.close()
                 
-        #     # 每次讀取 32 bytes(一組EEG data的大小)並轉成16進位。收一次等於 1ms 的時間
-        #     self.data = ser.read(32).hex() 
-        #     self.total_data = self.total_data + self.data
-        #     self.count = self.count + 1
+            # 每次讀取 32 bytes(一組EEG data的大小)並轉成16進位。收一次等於 1ms 的時間
+            self.data = ser.read(32).hex() 
+            self.total_data = self.total_data + self.data
+            self.count = self.count + 1
             
-        #     # -------------------------------------------------------- #
-        #     # 送去畫圖的資料 (每 100 ms 寫入資料到txt的最尾端)
-        #     # -------------------------------------------------------- #   
+            # -------------------------------------------------------- #
+            # 送去畫圖的資料 (每 100 ms 寫入資料到txt的最尾端)
+            # -------------------------------------------------------- #   
                                  
-        #     if self.count >= 100:
-        #         queue_plot_data.put(self.total_data)
+            if self.count >= 100:
+                queue_plot_data.put(self.total_data)
 
-        #         f.write(self.total_data)
-        #         self.count = 0
-        #         self.total_data = ""                
+                f.write(self.total_data)
+                self.count = 0
+                self.total_data = ""             
 
-        #     # -------------------------------------------------------- #
-        #     # 送進模型的資料
-        #     # -------------------------------------------------------- #
-        #     self.total_data_model = self.total_data_model + self.data
-        #     self.count_model = self.count_model + 1
+            # -------------------------------------------------------- #
+            # 送進模型的資料
+            # -------------------------------------------------------- #
+            self.total_data_model = self.total_data_model + self.data
+            self.count_model = self.count_model + 1
 
-        #     if self.count_model >= 3000:
-        #         # 將3s的資料丟進queue
-        #         queue_model_data.put(self.total_data_model)
+            if self.count_model >= 3000:
+                # 將3s的資料丟進queue
+                queue_model_data.put(self.total_data_model)
                 
-        #         # 經過 100 ms，raw長度 = 64*100 = 6400
-        #         self.count_model     -= 100
-        #         self.total_data_model = self.total_data_model[6400:]
+                # 經過 100 ms，raw長度 = 64*100 = 6400
+                # 每 0.1s 會分類長度為 2s 的資料
+                self.count_model     -= 100
+                self.total_data_model = self.total_data_model[6400:]
 
 class ModelPredictThreads(Ui_MainWindow):
     def __init__(self, model_state_dict_path, mean_std_path):
@@ -263,9 +296,11 @@ class ModelPredictThreads(Ui_MainWindow):
         # --------------------------------------------------------------------------------------------- #
         # 4-40 bandpass filtering
         # 沒有切掉超過閾值的訊號
+        eeg_raw = eeg_raw[:, :8]
         eeg_filtered = self.filter.filter(eeg_raw)
         data = eeg_filtered[900: -100].T
-        data = data[0:8]
+        # data.shape = (8, 2000)
+        # data = data[0:8]
         # --------------------------------------------------------------------------------------------- #
         
         # --------------------------------------------------------------------------------------------- #
@@ -284,16 +319,30 @@ class ModelPredictThreads(Ui_MainWindow):
         # data = data[0:8]
         # --------------------------------------------------------------------------------------------- #
 
+        bands = {
+            'Theta': (6, 8),
+            'Alpha': (8, 12),
+            'Beta': (12, 30),
+        }
+
+        filtered_data = np.zeros((8, 3, 200))
+        
+        for i, (band, (fmin, fmax)) in enumerate(bands.items()):
+            eeg_filtered = self.filter.butter_bandpass_filter(data, fmin, fmax, 1000)
+            eeg_resampled = signal.resample(eeg_filtered, 200, axis=-1)
+            filtered_data[:, i, :] = eeg_resampled
+
+        # filtered_data.shape = (8, 3, 200)
 
         # 降採樣
-        data = signal.resample(data, 500, axis = 1) # shape = (8, 500)
+        # data = signal.resample(data, 500, axis = 1) # shape = (8, 500)
 
         # z-socre normalization
-        z_normalized_data = (data - mean_std[0])/mean_std[1]
+        z_normalized_data = (filtered_data - mean_std[0])/mean_std[1]
 
         # 擴增維度，為符合模型輸入形狀。
-        z_normalized_data = np.expand_dims(z_normalized_data, axis = 0) # shape = (1, 8, 500)
-        preprocessed_data = np.expand_dims(z_normalized_data, axis = 1) # shape = (1, 1, 8, 500)
+        z_normalized_data = np.expand_dims(z_normalized_data, axis = 0) # shape = (1, 8, 3, 200)
+        preprocessed_data = np.expand_dims(z_normalized_data, axis = 1) # shape = (1, 1, 8, 3, 200)
         preprocessed_data = torch.from_numpy(preprocessed_data)
         preprocessed_data = Variable(preprocessed_data.cuda().type(torch.cuda.FloatTensor))
 
@@ -320,7 +369,7 @@ class ModelPredictThreads(Ui_MainWindow):
         # ------------------------------------------------------------------- #
         print(f"Load model with state_dict '{self.model_state_dict_path}'")
 
-        self.model = Conformer(in_channels=1, eeg_channels=8, in_size=1640, n_classes=4, depth=3)
+        self.model = Conformer(in_channels=1, eeg_channels=8, in_size=1240, n_classes=2, depth=1)
         self.model.load_state_dict(torch.load(self.model_state_dict_path))        
         self.model = self.model.cuda()           
         self.model.eval()
@@ -332,7 +381,7 @@ class ModelPredictThreads(Ui_MainWindow):
 
         # 預先載入模型，避免延遲
         print("Model pre-test result: ", end='')
-        data   = torch.from_numpy(np.zeros((1, 1, 8, 500)))
+        data   = torch.from_numpy(np.zeros((1, 1, 8, 3, 200)))
         data   = Variable(data.cuda().type(torch.cuda.FloatTensor))        
         y_pred = self.model_prediction(data, self.model)
         print(y_pred)
@@ -349,7 +398,7 @@ class ModelPredictThreads(Ui_MainWindow):
         
         while True:            
             try:                           
-                queue_size = queue_model_data.qsize()                
+                queue_size = queue_model_data.qsize()
                 raw        = queue_model_data.get()
                 time_start = time.time()
 
@@ -357,9 +406,10 @@ class ModelPredictThreads(Ui_MainWindow):
                 # Decode & filtering
                 # ------------------------------- # 
                 eeg_raw = self.decoder.get_BCI(raw, show_progress = False)
+                # shape = (3000, 11)
 
-                # shape = (1, 1, 8, 500)
-                data    = self.data_preprocessing(eeg_raw, self.mean_std) 
+                data    = self.data_preprocessing(eeg_raw, self.mean_std)
+                # shape = (1, 1, 8, 3, 200)
 
                 # ------------------------------- #
                 # model prediction
@@ -387,7 +437,7 @@ class ModelPredictThreads(Ui_MainWindow):
                 # print(f"{time_str} [{mean_window[0]:>3}, {mean_window[1]:>3}, {mean_window[2]:>3}, {mean_window[3]:>3}] {smooth_output} {y_pred}")
     
                 time_str = datetime.now().strftime('%H:%M:%S:%f')[:-5]
-                duration = (time.time() - time_start)*1000    
+                duration = (time.time() - time_start) * 1000
                 print(f"{time_str} - {duration:>4.1f}ms    "\
                     f"\033[90mqueue_size\033[0m  {queue_size}    "\
                     f"\033[90mprediction\033[0m  {y_pred}")
